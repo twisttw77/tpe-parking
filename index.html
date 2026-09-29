@@ -77,6 +77,14 @@
     <g id="i-info" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
       <circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.8v.4"/>
     </g>
+    <g id="i-card" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="2.5" y="5" width="19" height="14" rx="2.5"/>
+      <path d="M2.5 9.5h19M6 15h3.5"/>
+    </g>
+    <g id="i-toilet" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="4.8" r="2.3"/>
+      <path d="M9 20.5v-5.2H7.3l1.7-5a2 2 0 0 1 1.9-1.4h2.2a2 2 0 0 1 1.9 1.4l1.7 5H15v5.2z"/>
+    </g>
     <g id="i-more" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
       <path d="M12 5.5v.01M12 12v.01M12 18.5v.01"/>
     </g>
@@ -86,13 +94,13 @@
 <!-- ============================================================ 標題列 -->
 <header class="appbar">
   <div class="wrap appbar-inner">
-    <img src="icon.png" alt="" class="logo">
-    <h1 id="appTitle">TPE Parking</h1>
-
-    <!-- 返回鍵：只在詳情頁出現 -->
-    <button class="icon-btn" id="btnBack" hidden aria-label="返回">
-      <svg class="ic" viewBox="0 0 24 24"><use href="#i-back"/></svg>
+    <!-- 返回鍵：只在詳情頁出現。用文字「返回」而不是單一個箭頭，比較好懂 -->
+    <button class="back-btn" id="btnBack" hidden>
+      <svg class="ic" viewBox="0 0 24 24"><use href="#i-back"/></svg>返回
     </button>
+
+    <img src="icon.png" alt="" class="logo" id="logo">
+    <h1 id="appTitle">TPE Parking</h1>
 
     <!-- 新增停車場：計劃書確認放在停車場分頁的右上角 -->
     <button class="icon-btn primary" id="btnAdd" aria-label="手動新增停車場">
@@ -124,6 +132,8 @@
       <button class="chip" data-filter="fav" aria-pressed="false">
         <svg class="ic ic-sm" viewBox="0 0 24 24"><use href="#i-star"/></svg>我的最愛
       </button>
+      <button class="chip" data-filter="card" aria-pressed="false">信用卡優惠</button>
+      <button class="chip" data-filter="toilet" aria-pressed="false">有廁所</button>
       <button class="chip" data-filter="open" aria-pressed="false">現在有營業</button>
       <button class="chip" data-filter="cap" aria-pressed="false">有每日上限</button>
       <button class="chip" data-filter="sure" aria-pressed="false">費率明確</button>

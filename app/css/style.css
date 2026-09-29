@@ -157,6 +157,18 @@ a { color: var(--brand); }
 }
 .appbar .logo { width: 24px; height: 24px; border-radius: 6px; flex: none; }
 
+/* 返回鍵：帶文字，比單一個箭頭好懂 */
+.back-btn {
+  display: inline-flex; align-items: center; gap: 3px;
+  height: 36px; padding: 0 12px 0 8px; margin-left: -6px;
+  border-radius: 999px;
+  color: var(--brand);
+  font-size: .9375rem; font-weight: 580;
+  transition: background .15s;
+}
+.back-btn:hover { background: var(--brand-soft); }
+.back-btn .ic { width: 19px; height: 19px; }
+
 /* 標題列上的圓形圖示按鈕（例如右上角的「＋」） */
 .icon-btn {
   width: 38px; height: 38px; flex: none;

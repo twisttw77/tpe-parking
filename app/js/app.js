@@ -182,6 +182,9 @@
         if (f === 'cap' && l.fare?.cap == null) return false;
         if (f === 'sure' && !(l.fare?.kind === 'hourly' && l.fare.c === 'high')) return false;
         if (f === 'open' && isOpenNow(l.serviceTime) === false) return false;
+        // 信用卡優惠和廁所開放資料沒有提供，是你自己補上去的
+        if (f === 'card' && !l.creditCard) return false;
+        if (f === 'toilet' && !l.toilet) return false;
       }
       return true;
     });
@@ -225,6 +228,10 @@
     if (lot.isCustom) t.push(`<span class="tag brand">我新增的</span>`);
     if (lot.edited) t.push(`<span class="tag">已修改</span>`);
     if (lot.fare?.cap != null) t.push(`<span class="tag ok">每日上限 $${lot.fare.cap}</span>`);
+    if (lot.creditCard) {
+      t.push(`<span class="tag ok">${icon('card', 'ic ic-sm')}${esc(lot.creditCard)}</span>`);
+    }
+    if (lot.toilet) t.push(`<span class="tag">${icon('toilet', 'ic ic-sm')}廁所</span>`);
 
     const c = lot.fare?.kind === 'hourly' ? FE.CONFIDENCE_LABEL[lot.fare.c] : null;
     if (c && lot.fare.c !== 'high') {
@@ -313,6 +320,8 @@
     const conf = f.kind === 'hourly' ? FE.CONFIDENCE_LABEL[f.c] : null;
     const note = ST.notes.get(id);
     const open = isOpenNow(lot.serviceTime);
+    // 開放資料沒有的欄位，空著時顯示這句，提示可以自己補
+    const blank = '<span style="color:var(--text-3);font-weight:400">尚未填寫</span>';
 
     const mapUrl = lot.lat != null
       ? `https://www.google.com/maps/dir/?api=1&destination=${lot.lat},${lot.lng}`
@@ -335,6 +344,16 @@
         ${row('汽車位', lot.totalCar ? `${lot.totalCar} 格` : null)}
         ${row('電話', lot.tel ? `<a href="tel:${esc(lot.tel)}">${esc(lot.tel)}</a>` : null)}
         ${row('停車場類型', esc(lot.category))}
+        ${row('信用卡優惠', lot.creditCard
+            ? `<span class="tag ok">${icon('card', 'ic ic-sm')}${esc(lot.creditCard)}</span>`
+            : blank)}
+        ${row('附設廁所', lot.toilet
+            ? `<span class="tag">${icon('toilet', 'ic ic-sm')}有</span>`
+            : blank)}
+        <p class="disclaimer" style="padding:0 0 12px">
+          ${icon('info', 'ic ic-sm')} 信用卡優惠和廁所是政府開放資料沒有提供的，
+          去過之後可以按下面的「編輯資料」自己補上，App 會永久記住。
+        </p>
       </div>
 
       <div class="card">
@@ -871,6 +890,18 @@
         <input type="text" id="lTime" value="${esc(l.serviceTime)}" placeholder="例如：0~24時 或 7-20">
       </div>
 
+      <div class="field">
+        <label for="lCard">信用卡優惠</label>
+        <input type="text" id="lCard" value="${esc(l.creditCard)}"
+               placeholder="例如：國泰 CUBE 卡 9 折">
+        <p class="hint">政府資料沒有這項，去過之後可以自己記下來。留空表示沒有優惠。</p>
+      </div>
+
+      <label class="switch">
+        <span>附設廁所</span>
+        <input type="checkbox" id="lToilet" ${l.toilet ? 'checked' : ''}><i class="track"></i>
+      </label>
+
       ${fareFieldsHtml(f)}
 
       <div class="modal-actions">
@@ -895,6 +926,8 @@
           operator: $('#lOp').value.trim() || null,
           address: $('#lAddr').value.trim() || null,
           serviceTime: $('#lTime').value.trim() || null,
+          creditCard: $('#lCard').value.trim() || null,
+          toilet: $('#lToilet').checked,
           lat, lng,
           fare: readFareFields(),
         };
@@ -1130,8 +1163,10 @@
     $$('.tabbar button').forEach((b) =>
       b.setAttribute('aria-selected', String(b.dataset.tab === tab)));
 
+    // 詳情頁：左邊換成「返回」，圖示收起來不跟它擠
     const isDetail = tab === 'detail';
     $('#btnBack').hidden = !isDetail;
+    $('#logo').hidden = isDetail;
     $('#btnAdd').hidden = tab !== 'lots';
     $('#appTitle').textContent = isDetail ? '停車場詳情' : 'TPE Parking';
 
@@ -1324,6 +1359,22 @@
     if (!ST.isWorking()) {
       toast('這個瀏覽器不允許儲存資料，紀錄可能無法保存');
     }
+
+    registerOffline();
+  }
+
+  /**
+   * 啟用離線功能。
+   * 直接用檔案總管打開（file://）時瀏覽器不允許，這時候略過就好，
+   * 不影響其他功能。
+   */
+  function registerOffline() {
+    if (!('serviceWorker' in navigator)) return;
+    if (location.protocol === 'file:') return;
+
+    navigator.serviceWorker.register('./sw.js').catch((err) => {
+      console.warn('離線功能無法啟用', err);
+    });
   }
 
   if (document.readyState === 'loading') {
