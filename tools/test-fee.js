@@ -16,8 +16,8 @@ function at(dateStr, minutes) {
   return [s, new Date(s.getTime() + minutes * 60000)];
 }
 
-function check(title, rule, [start, end], expected) {
-  const got = calcFee(rule, start, end);
+function check(title, rule, [start, end], expected, opts) {
+  const got = calcFee(rule, start, end, opts);
   const ok = got.amount === expected;
   if (ok) { pass++; console.log(`✓ ${title} → ${got.amount === null ? '算不出來' : got.amount + ' 元'}`); }
   else {
@@ -98,7 +98,23 @@ check('平日（週三）停 2 小時', rWeekend, at(WED, 120), 40);
 check('假日（週六）停 2 小時', rWeekend, at(SAT, 120), 120);
 
 console.log('\n' + '='.repeat(60));
-console.log('七、特殊情況');
+console.log('七、信用卡優惠折抵');
+console.log('='.repeat(60));
+// 折抵的意思是「前 N 小時不收錢」，等於把那段時間從停車時間裡扣掉
+const D1H = { discountMinutes: 60 };
+check('折抵 1 小時，只停 45 分鐘 → 完全免費', r20, at(WED, 45), 0, D1H);
+check('折抵 1 小時，停 60 分鐘 → 剛好打平', r20, at(WED, 60), 0, D1H);
+check('折抵 1 小時，停 90 分鐘 → 只算 30 分鐘', r20, at(WED, 90), 20, D1H);
+check('折抵 1 小時，停 150 分鐘 → 算 90 分鐘', r20, at(WED, 150), 30, D1H);
+// 首小時 50、之後半小時 20 的場子，折抵 1 小時後停 2 小時 → 只算 60 分 = 50 元
+check('首段制場子，折抵 1 小時、停 2 小時', rStep, at(WED, 120), 50, D1H);
+check('折抵 2 小時，停 2 小時 → 免費', rStep, at(WED, 120), 0, { discountMinutes: 120 });
+// 有每日上限時，折抵仍要先扣時間再套上限
+check('有上限的場子，折抵 1 小時、停 10 小時', rCap, at(WED, 600), 200, D1H);
+check('沒勾選折抵時，費用不受影響', r20, at(WED, 90), 30, { discountMinutes: 0 });
+
+console.log('\n' + '='.repeat(60));
+console.log('八、特殊情況');
 console.log('='.repeat(60));
 check('免費停車場', { kind: 'free' }, at(WED, 300), 0);
 check('費率不明 → 必須回傳「算不出來」而不是 0 元',

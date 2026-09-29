@@ -70,32 +70,50 @@
    * @param {object} rule  費率規則
    * @param {number|Date} startAt 進場時間
    * @param {number|Date} endAt   出場時間
-   * @returns {{amount:number|null, minutes:number, detail:string, capped:boolean, days:Array}}
+   * @param {object} [opts]
+   * @param {number} [opts.discountMinutes] 信用卡等優惠折抵幾分鐘
+   * @returns {{amount:number|null, minutes:number, billedMinutes:number,
+   *           detail:string, capped:boolean, days:Array, discountMinutes:number}}
    *          amount 為 null 代表「算不出來」（費率不明），不是 0 元
    */
-  function calcFee(rule, startAt, endAt) {
+  function calcFee(rule, startAt, endAt, opts = {}) {
     const start = new Date(startAt);
     const end = new Date(endAt);
     const minutes = Math.max(0, Math.ceil((end - start) / MIN));
 
+    // 折抵：把折抵的時數從停車時間裡扣掉再計費
+    // （台灣停車場的折抵券通常就是這個意思：前 N 小時不收錢）
+    const discountMinutes = Math.max(0, Math.round(opts.discountMinutes || 0));
+    const billEnd = new Date(end.getTime() - discountMinutes * MIN);
+    const billedMinutes = Math.max(0, Math.ceil((billEnd - start) / MIN));
+
+    const base = { minutes, billedMinutes, discountMinutes };
+
     if (!rule || rule.kind === 'unknown') {
-      return { amount: null, minutes, detail: '這個停車場的費率還沒設定', capped: false, days: [] };
+      return { ...base, amount: null, detail: '這個停車場的費率還沒設定', capped: false, days: [] };
     }
     if (rule.kind === 'free') {
-      return { amount: 0, minutes, detail: '免費停車', capped: false, days: [] };
+      return { ...base, amount: 0, detail: '免費停車', capped: false, days: [] };
+    }
+    // 折抵時數已經涵蓋整段停車 → 不用付錢
+    if (billedMinutes <= 0) {
+      return {
+        ...base, amount: 0, capped: false, days: [],
+        detail: '優惠折抵已涵蓋全部停車時間',
+      };
     }
 
     // 沒有每日上限、也沒有假日費率 → 整段一次算完，最單純
     const needSplit = rule.cap != null || rule.weekend;
     if (!needSplit) {
       const r = rule;
-      const amount = feeForMinutes(r, minutes);
+      const amount = feeForMinutes(r, billedMinutes);
       return {
+        ...base,
         amount,
-        minutes,
         detail: describeRule(r),
         capped: false,
-        days: [{ from: start, to: end, minutes, amount, capped: false }],
+        days: [{ from: start, to: billEnd, minutes: billedMinutes, amount, capped: false }],
       };
     }
 
@@ -107,9 +125,9 @@
     let anyCapped = false;
     let guard = 0;
 
-    while (cursor < end && guard++ < 400) {
+    while (cursor < billEnd && guard++ < 400) {
       const dayEnd = new Date(startOfDay(cursor).getTime() + DAY);
-      const segEnd = dayEnd < end ? dayEnd : end;
+      const segEnd = dayEnd < billEnd ? dayEnd : billEnd;
       const segMin = Math.max(0, Math.ceil((segEnd - cursor) / MIN));
 
       const r = ruleForDate(rule, cursor);
@@ -128,8 +146,8 @@
     }
 
     return {
+      ...base,
       amount: total,
-      minutes,
       detail: describeRule(ruleForDate(rule, start)),
       capped: anyCapped,
       days,

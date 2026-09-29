@@ -577,6 +577,26 @@ input:checked + .track::after { transform: translateX(19px); }
   box-shadow: 0 0 0 2px var(--surface);
 }
 
+/* ---------- 回到最上方 ---------- */
+.to-top {
+  position: fixed; right: 16px; z-index: 45;
+  bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px) + 16px);
+  width: 46px; height: 46px;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--text-2);
+  border: 1px solid var(--line);
+  box-shadow: 0 4px 16px rgba(20, 20, 30, .12);
+  transition: opacity .2s, transform .2s, background .15s, color .15s;
+}
+.to-top:hover { background: var(--brand); color: var(--brand-ink); border-color: var(--brand); }
+/* 淡入淡出，不要突然出現 */
+.to-top { opacity: 0; transform: translateY(8px); pointer-events: none; }
+.to-top.show { opacity: 1; transform: none; pointer-events: auto; }
+
+@media (min-width: 900px) { .to-top { right: calc(50vw - 430px + 16px); } }
+
 /* ---------- 浮動提示 ---------- */
 .toast {
   position: fixed; left: 50%; transform: translateX(-50%) translateY(12px);

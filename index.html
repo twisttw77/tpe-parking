@@ -77,6 +77,9 @@
     <g id="i-info" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
       <circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.8v.4"/>
     </g>
+    <g id="i-top" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 19V6M6 12l6-6 6 6"/>
+    </g>
     <g id="i-card" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
       <rect x="2.5" y="5" width="19" height="14" rx="2.5"/>
       <path d="M2.5 9.5h19M6 15h3.5"/>
@@ -202,6 +205,11 @@
     <div id="modalBody"></div>
   </div>
 </div>
+
+<!-- 往下滑一段之後才出現，點一下回到最上面 -->
+<button class="to-top" id="toTop" hidden aria-label="回到最上方">
+  <svg class="ic" viewBox="0 0 24 24"><use href="#i-top"/></svg>
+</button>
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 

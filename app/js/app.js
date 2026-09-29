@@ -344,8 +344,11 @@
         ${row('汽車位', lot.totalCar ? `${lot.totalCar} 格` : null)}
         ${row('電話', lot.tel ? `<a href="tel:${esc(lot.tel)}">${esc(lot.tel)}</a>` : null)}
         ${row('停車場類型', esc(lot.category))}
-        ${row('信用卡優惠', lot.creditCard
-            ? `<span class="tag ok">${icon('card', 'ic ic-sm')}${esc(lot.creditCard)}</span>`
+        ${row('信用卡優惠', lot.creditCard || lot.cardHours
+            ? `<span class="tag ok">${icon('card', 'ic ic-sm')}${
+                esc(lot.creditCard || '有優惠')}</span>${
+                lot.cardHours ? `<div class="hint" style="margin-top:4px">可折抵 ${
+                  FE.formatDuration(lot.cardHours * 60)}</div>` : ''}`
             : blank)}
         ${row('附設廁所', lot.toilet
             ? `<span class="tag">${icon('toilet', 'ic ic-sm')}有</span>`
@@ -422,8 +425,10 @@
     }
 
     $('#timerBadge').hidden = false;
-    const lot = findLot(s.lotId);
-    const fare = lot?.fare || { kind: 'unknown' };
+    const lot = findLot(s.lotId) || {};
+    const fare = lot.fare || { kind: 'unknown' };
+    // 這個停車場有沒有登記過優惠？有才顯示折抵的勾選框
+    const hasDiscount = !!(lot.creditCard || lot.cardHours);
 
     box.innerHTML = `
       <div class="timer-card">
@@ -439,6 +444,27 @@
           <div class="rate" id="rate"></div>
         </div>
       </div>
+
+      ${hasDiscount ? `
+      <div class="card pad">
+        <label class="switch" style="padding-top:0">
+          <span>
+            使用信用卡／消費優惠
+            ${lot.creditCard ? `<br><span class="hint" style="margin:0">${esc(lot.creditCard)}</span>` : ''}
+          </span>
+          <input type="checkbox" id="useCard" ${s.useCard ? 'checked' : ''}><i class="track"></i>
+        </label>
+        <div id="cardHoursBox" ${s.useCard ? '' : 'hidden'}>
+          <div class="field" style="margin:12px 0 0">
+            <label for="cardHours">折抵幾小時</label>
+            <input type="number" id="cardHours" step="0.5" min="0" max="24" inputmode="decimal"
+                   value="${s.cardHours ?? lot.cardHours ?? 1}">
+            <p class="hint">
+              停車費會扣掉這段時間再計算。實際折抵以停車場現場認定為準。
+            </p>
+          </div>
+        </div>
+      </div>` : ''}
 
       <div class="card pad">
         <h3 style="margin-top:0">停車位置</h3>
@@ -474,20 +500,62 @@
       <button class="btn danger block" id="stop" style="margin-bottom:20px">結束停車並記錄</button>
     `;
 
+    /** 目前這次停車套用的折抵分鐘數 */
+    const discountMinutes = () => {
+      const cur = ST.active.get();
+      if (!cur?.useCard) return 0;
+      return Math.max(0, Number(cur.cardHours ?? lot.cardHours ?? 0)) * 60;
+    };
+
     const update = () => {
       const now = Date.now();
+      const disc = discountMinutes();
       $('#clock').textContent = FE.formatClock(now - s.startAt);
-      const r = FE.calcFee(fare, s.startAt, now);
+
+      const r = FE.calcFee(fare, s.startAt, now, { discountMinutes: disc });
       $('#fee').textContent = r.amount == null ? '無法估算' : `$${r.amount}`;
       $('#rate').innerHTML = r.amount == null
         ? '費率未設定'
         : (fare.kind === 'free' ? '免費' : esc(FE.describeRule(fare)).replace('，', '<br>'));
-      $('#ruleText').textContent = r.amount == null
-        ? '這個停車場的費率還沒設定，可以到停車場詳情頁設定一次，之後就會自動計算。'
-        : `計費方式：${r.detail}${FE.isWeekend(new Date(s.startAt)) ? '（今天是假日）' : '（今天是平日）'}`;
+
+      let txt;
+      if (r.amount == null) {
+        txt = '這個停車場的費率還沒設定，可以到停車場詳情頁設定一次，之後就會自動計算。';
+      } else {
+        txt = `計費方式：${r.detail}`
+          + (FE.isWeekend(new Date(s.startAt)) ? '（今天是假日）' : '（今天是平日）');
+        if (disc > 0) {
+          txt += r.billedMinutes <= 0
+            ? `　已折抵 ${FE.formatDuration(disc)}，目前不用付費。`
+            : `　已折抵 ${FE.formatDuration(disc)}，實際計費 ${FE.formatDuration(r.billedMinutes)}。`;
+        }
+      }
+      $('#ruleText').textContent = txt;
     };
     update();
     tick = setInterval(update, 1000);
+
+    // 折抵的勾選與時數
+    const useCard = $('#useCard');
+    if (useCard) {
+      useCard.onchange = () => {
+        const on = useCard.checked;
+        $('#cardHoursBox').hidden = !on;
+        ST.active.update({
+          useCard: on,
+          cardHours: Number($('#cardHours')?.value ?? lot.cardHours ?? 1),
+        });
+        update();
+        toast(on ? '已套用優惠折抵' : '已取消優惠折抵');
+      };
+    }
+    const cardHours = $('#cardHours');
+    if (cardHours) {
+      cardHours.oninput = () => {
+        ST.active.update({ cardHours: Math.max(0, Number(cardHours.value) || 0) });
+        update();
+      };
+    }
 
     $('#savePos').onclick = () => {
       ST.active.update({ floor: $('#floor').value.trim(), space: $('#space').value.trim() });
@@ -495,7 +563,8 @@
     };
 
     $('#editStart').onclick = () => openStartEditor(s);
-    $('#stop').onclick = () => confirmStop(s, lot, fare);
+    // 重新讀一次，才會帶到剛剛勾的折抵設定
+    $('#stop').onclick = () => confirmStop(ST.active.get(), lot, fare, discountMinutes());
   }
 
   /** 修改進場時間（忘記按開始時可以補，測試費率時也很好用） */
@@ -525,9 +594,9 @@
   }
 
   /** 結束停車前先確認，避免手滑 */
-  function confirmStop(s, lot, fare) {
+  function confirmStop(s, lot, fare, discountMinutes = 0) {
     const end = Date.now();
-    const r = FE.calcFee(fare, s.startAt, end);
+    const r = FE.calcFee(fare, s.startAt, end, { discountMinutes });
     const dur = FE.formatDuration(r.minutes);
 
     openModal('結束停車', `
@@ -536,6 +605,11 @@
         <div class="cell"><div class="k">停車時間</div><div class="v" style="font-size:1rem">${dur}</div></div>
         <div class="cell"><div class="k">預估費用</div><div class="v">${r.amount == null ? '—' : '$' + r.amount}</div></div>
       </div>
+      ${discountMinutes > 0
+        ? `<p class="hint" style="margin:10px 0 0">
+             已套用優惠折抵 ${FE.formatDuration(discountMinutes)}${
+               r.billedMinutes > 0 ? `，實際計費 ${FE.formatDuration(r.billedMinutes)}` : ''}
+           </p>` : ''}
       ${r.amount == null
         ? `<div class="field" style="margin-top:12px">
              <label for="manualFee">這個停車場的費率沒有設定，實際付了多少？</label>
@@ -563,6 +637,7 @@
           floor: s.floor,
           space: s.space,
           estimated: r.amount != null,
+          discountMinutes: discountMinutes || 0,
         });
         ST.active.clear();
         closeModal();
@@ -602,12 +677,14 @@
       `, () => {
         $('#okSwitch').onclick = () => {
           const oldLot = findLot(cur.lotId);
-          const r = FE.calcFee(oldLot?.fare || { kind: 'unknown' }, cur.startAt, Date.now());
+          const disc = cur.useCard ? Math.max(0, Number(cur.cardHours || 0)) * 60 : 0;
+          const r = FE.calcFee(oldLot?.fare || { kind: 'unknown' }, cur.startAt, Date.now(),
+            { discountMinutes: disc });
           ST.history.add({
             lotId: cur.lotId, lotName: cur.lotName, operator: cur.operator,
             startAt: cur.startAt, endAt: Date.now(), minutes: r.minutes,
             amount: r.amount, floor: cur.floor, space: cur.space,
-            estimated: r.amount != null,
+            estimated: r.amount != null, discountMinutes: disc,
           });
           closeModal();
           doStart();
@@ -672,6 +749,8 @@
             ${pos ? `${icon('pin', 'ic ic-sm')} ${esc(pos)}<br>` : ''}
             ${fmtDateTime(r.startAt)} → ${fmtDateTime(r.endAt)}
             <span class="dot">·</span> ${FE.formatDuration(r.minutes)}
+            ${r.discountMinutes > 0
+              ? `<span class="dot">·</span> 已折抵 ${FE.formatDuration(r.discountMinutes)}` : ''}
             ${r.estimated === false ? '<span class="dot">·</span> 手動填寫' : ''}
           </div>
           <div class="rec-actions">
@@ -891,10 +970,19 @@
       </div>
 
       <div class="field">
-        <label for="lCard">信用卡優惠</label>
+        <label for="lCard">信用卡／消費優惠</label>
         <input type="text" id="lCard" value="${esc(l.creditCard)}"
-               placeholder="例如：國泰 CUBE 卡 9 折">
+               placeholder="例如：國泰 CUBE 卡折抵 1 小時">
         <p class="hint">政府資料沒有這項，去過之後可以自己記下來。留空表示沒有優惠。</p>
+      </div>
+      <div class="field">
+        <label for="lCardHours">這個優惠可以折抵幾小時</label>
+        <input type="number" id="lCardHours" step="0.5" min="0" max="24"
+               inputmode="decimal" value="${l.cardHours ?? ''}" placeholder="例如：1">
+        <p class="hint">
+          填了之後，開始停車時就可以勾選「使用優惠」，費用會自動扣掉這段時間。
+          可以填 0.5 表示半小時。
+        </p>
       </div>
 
       <label class="switch">
@@ -927,6 +1015,7 @@
           address: $('#lAddr').value.trim() || null,
           serviceTime: $('#lTime').value.trim() || null,
           creditCard: $('#lCard').value.trim() || null,
+          cardHours: $('#lCardHours').value === '' ? null : Number($('#lCardHours').value),
           toilet: $('#lToilet').checked,
           lat, lng,
           fare: readFareFields(),
@@ -1262,6 +1351,16 @@
       };
     });
     $('#fNear').onclick = locateMe;
+
+    // 回到最上方：滑過一個螢幕高度才出現，免得一直擋在那裡
+    const toTop = $('#toTop');
+    toTop.hidden = false;
+    const onScroll = () => {
+      toTop.classList.toggle('show', window.scrollY > window.innerHeight * 0.8);
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+    toTop.onclick = () => window.scrollTo({ top: 0, behavior: 'smooth' });
 
     // 歷史紀錄的範圍切換
     $$('#rangeSeg button').forEach((b) => {

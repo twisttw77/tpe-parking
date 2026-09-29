@@ -10,7 +10,7 @@
  * 注意：改版時一定要把 VERSION 加一，否則使用者會一直看到舊版。
  */
 
-const VERSION = 'v1';
+const VERSION = 'v2';
 const CACHE = `tpe-parking-${VERSION}`;
 
 const ASSETS = [
@@ -47,31 +47,65 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+/**
+ * 停車場資料檔很大（約 2MB）但內容不常變，
+ * 程式檔很小但每次更新都必須馬上生效。所以兩者用不同策略。
+ */
+function isBigData(url) {
+  return url.pathname.includes('/app/data/') || url.pathname.endsWith('.png');
+}
+
 self.addEventListener('fetch', (event) => {
   const req = event.request;
 
   // 只處理自己的檔案，外部連結（例如 Google 地圖）不攔截
   if (req.method !== 'GET') return;
-  if (new URL(req.url).origin !== self.location.origin) return;
+  const url = new URL(req.url);
+  if (url.origin !== self.location.origin) return;
 
   event.respondWith(
-    caches.match(req).then((cached) => {
-      // 背景更新：就算有存檔，也順便去看看有沒有新版
-      const fresh = fetch(req)
-        .then((res) => {
-          if (res && res.status === 200) {
-            const copy = res.clone();
-            caches.open(CACHE).then((c) => c.put(req, copy));
-          }
-          return res;
-        })
-        .catch(() => null);
-
-      // 有存檔就先用存檔（快），沒有才等網路
-      return cached || fresh.then((res) => res || offlineFallback(req));
-    })
+    isBigData(url) ? cacheFirst(req) : networkFirst(req)
   );
 });
+
+/**
+ * 程式檔：有網路就拿最新的，沒網路才用存檔。
+ * 這樣更新之後打開就是新版，不會還要重整第二次才生效。
+ */
+async function networkFirst(req) {
+  try {
+    const res = await fetch(req);
+    if (res && res.status === 200) {
+      const copy = res.clone();
+      caches.open(CACHE).then((c) => c.put(req, copy));
+    }
+    return res;
+  } catch (err) {
+    const cached = await caches.match(req);
+    return cached || offlineFallback(req);
+  }
+}
+
+/**
+ * 大檔案：先用存檔（開得快），同時在背景偷偷更新，
+ * 下次打開就會是新資料。
+ */
+async function cacheFirst(req) {
+  const cached = await caches.match(req);
+
+  const fresh = fetch(req)
+    .then((res) => {
+      if (res && res.status === 200) {
+        const copy = res.clone();
+        caches.open(CACHE).then((c) => c.put(req, copy));
+      }
+      return res;
+    })
+    .catch(() => null);
+
+  if (cached) return cached;
+  return (await fresh) || offlineFallback(req);
+}
 
 /** 完全沒網路又沒存檔時，至少回傳首頁而不是錯誤畫面 */
 function offlineFallback(req) {
