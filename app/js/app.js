@@ -1050,6 +1050,12 @@
       <p class="disclaimer" style="margin:0 0 16px">
         設定一次就會永久記住，之後這個停車場都用你的版本計算。
       </p>
+      ${lot.fare?.bands?.length ? `
+        <p class="disclaimer" style="margin:-8px 0 16px;color:var(--warn)">
+          ${icon('info', 'ic ic-sm')} 這個停車場目前是「不同時段不同價」
+          （${esc(FE.describeRule(lot.fare))}）。
+          在這裡手動設定會改成單一費率，取代原本的時段規則。
+        </p>` : ''}
       ${fareFieldsHtml(f)}
       <div class="modal-actions">
         <button class="btn grow" data-close>取消</button>

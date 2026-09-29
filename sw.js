@@ -7,10 +7,11 @@
  * 做法：第一次打開時把程式和停車場資料存在手機裡，
  * 之後優先從手機裡讀，同時在背景偷偷檢查有沒有新版本。
  *
- * 注意：改版時一定要把 VERSION 加一，否則使用者會一直看到舊版。
+ * 下面的 VERSION 由 tools/build-data.js 在重新產生資料時自動更新，
+ * 不需要手動改。版本一變，使用者手機裡的舊資料就會自動換成新的。
  */
 
-const VERSION = 'v2';
+const VERSION = '202609291913';
 const CACHE = `tpe-parking-${VERSION}`;
 
 const ASSETS = [

@@ -44,6 +44,69 @@
   }
 
   /**
+   * 找出某個鐘點屬於哪個時段。
+   * 時段可能跨過午夜，例如 21:00–09:00。
+   */
+  function findBand(bands, hour) {
+    for (const b of bands) {
+      if (b.from < b.to) {
+        if (hour >= b.from && hour < b.to) return b;
+      } else {
+        // 跨午夜：21–9 表示 21:00 之後到隔天 9:00 之前
+        if (hour >= b.from || hour < b.to) return b;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * 算出「進位之後要計費幾分鐘」。
+   * 例如規則是首 60 分、之後每 30 分，實際停 70 分鐘 → 要算 90 分鐘的錢。
+   */
+  function billableMinutes(r, minutes) {
+    if (minutes <= 0) return 0;
+    const fm = r.fm > 0 ? r.fm : 60;
+    const um = r.um > 0 ? r.um : fm;
+    if (minutes <= fm) return fm;
+    return fm + Math.ceil((minutes - fm) / um) * um;
+  }
+
+  /**
+   * 時段費率的計算：同一天不同時間單價不同
+   * （例如白天 40 元/時、晚上 30 元/時）。
+   *
+   * 做法：先依進位規則算出要計費幾分鐘，
+   * 再把這些分鐘從進場時間往後排，每個鐘點套用當時的單價。
+   */
+  function feeWithBands(r, start, minutes) {
+    const billable = billableMinutes(r, minutes);
+    if (billable <= 0) return 0;
+
+    let total = 0;
+    let cursor = new Date(start);
+    let left = billable;
+    let guard = 0;
+
+    while (left > 0 && guard++ < 3000) {
+      const band = findBand(r.bands, cursor.getHours());
+      const rate = band ? band.hourly : (r.hourly || 0);
+
+      // 這個鐘點還剩幾分鐘
+      const nextHour = new Date(cursor);
+      nextHour.setMinutes(0, 0, 0);
+      nextHour.setHours(nextHour.getHours() + 1);
+
+      const chunk = Math.min(left, (nextHour - cursor) / MIN);
+      total += (rate * chunk) / 60;
+      left -= chunk;
+      cursor = new Date(cursor.getTime() + chunk * MIN);
+    }
+
+    // 無條件進位到整數元（寧可估高，不要現場才發現不夠）
+    return Math.ceil(total);
+  }
+
+  /**
    * 算一段連續停車的費用（不考慮跨日、不考慮上限）
    *
    * 規則：先收「首段」的錢，超過首段之後，每滿一個「單位」收一次錢，
@@ -100,6 +163,21 @@
       return {
         ...base, amount: 0, capped: false, days: [],
         detail: '優惠折抵已涵蓋全部停車時間',
+      };
+    }
+
+    // 有時段費率（白天晚上不同價）→ 交給專門的算法
+    if (rule.bands?.length) {
+      const r = ruleForDate(rule, start);
+      let amount = feeWithBands(r, start, billedMinutes);
+      let capped = false;
+      if (r.cap != null && amount > r.cap) { amount = r.cap; capped = true; }
+      return {
+        ...base,
+        amount,
+        detail: describeRule(r),
+        capped,
+        days: [{ from: start, to: billEnd, minutes: billedMinutes, amount, capped }],
       };
     }
 
@@ -161,11 +239,19 @@
     if (r.kind === 'unknown') return '費率未設定';
 
     const unit = (m) => (m === 60 ? '1 小時' : m === 30 ? '半小時' : `${m} 分鐘`);
-    const same = r.fm === r.um && r.fp === r.up;
+    const hh = (h) => `${String(h).padStart(2, '0')}:00`;
 
-    let s = same
-      ? `每 ${unit(r.um)} ${r.up} 元`
-      : `前 ${unit(r.fm)} ${r.fp} 元，之後每 ${unit(r.um)} ${r.up} 元`;
+    let s;
+    if (r.bands?.length) {
+      // 時段費率：「09:00–21:00 每小時 40 元／21:00–09:00 每小時 30 元」
+      s = r.bands.map((b) => `${hh(b.from)}–${hh(b.to)} 每小時 ${b.hourly} 元`).join('，');
+      s += `，以 ${unit(r.um || 30)} 為單位計費`;
+    } else {
+      const same = r.fm === r.um && r.fp === r.up;
+      s = same
+        ? `每 ${unit(r.um)} ${r.up} 元`
+        : `前 ${unit(r.fm)} ${r.fp} 元，之後每 ${unit(r.um)} ${r.up} 元`;
+    }
 
     if (r.cap != null) s += `，每日上限 ${r.cap} 元`;
     return s;

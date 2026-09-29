@@ -80,6 +80,56 @@ const CASES = [
   },
 ];
 
+// 時段費率與平假日費率（這些原本都只能標成「需人工確認」）
+const BAND_CASES = [
+  {
+    text: '小型車：計時 40元/時(09-21)，30元/時(21-09)，停車全程以半小時計。',
+    check: (r) => r.bands?.length === 2
+      && r.bands.some((b) => b.from === 9 && b.to === 21 && b.hourly === 40)
+      && r.bands.some((b) => b.from === 21 && b.to === 9 && b.hourly === 30)
+      && r.confidence !== 'low',
+    why: '日夜兩段費率（金額在前）',
+  },
+  {
+    text: '小型車：計時 週一~週五(10時~22時)50元/時，(22時~10時)10元/時，全程以半小時計',
+    check: (r) => r.bands?.length === 2
+      && r.bands.some((b) => b.hourly === 50) && r.bands.some((b) => b.hourly === 10),
+    why: '日夜兩段費率（時段在前）',
+  },
+  {
+    text: '計時：小型車週一至週五20元/時，週六至週日及政府行政機關放假之紀念日30元/時，停車全程以半小時計。',
+    check: (r) => r.hourly === 20 && r.weekend?.hourly === 30 && r.confidence !== 'low',
+    why: '平日 20 元、假日 30 元',
+  },
+  {
+    text: '計時：小型車週一至週日、展覽期間100元/時(08-22)，非展覽期間70元/時(08-22)、40元/時(22-08)，停車未滿1小時以1小時計。',
+    check: (r) => r.confidence === 'low',
+    why: '同時有時段又有特殊期間，組合太亂 → 必須維持「需人工確認」',
+  },
+  {
+    text: '小型車：計時 週一至週五50元/時(08-20)，10元/時(20-08)，週六、週日60元/時(10-20)，10元/時(20-10)，停車全程以半小時計',
+    check: (r) => r.confidence === 'low',
+    why: '時段和平假日同時存在 → 不硬解，維持「需人工確認」',
+  },
+  {
+    text: '計時：小型車100元/時，停車全程以半小時計。',
+    check: (r) => !r.bands && !r.weekend && r.confidence === 'high',
+    why: '單純費率不該被誤判出時段或假日規則',
+  },
+  {
+    // 2026-09-30 抽樣時抓到：百齡高中有「週一至週四」和「週五至週日」兩套時段表，
+    // 混在一起解析會產生重疊時段，算出來的錢是錯的
+    text: '計時：小型車週一至週四10元/時(00-09)、40元/時(09-22)、10元/時(22-00)，週五至週日及政府行政機關放假之紀念日、民俗節日50元/時(00-02)、10元/時(02-08)、30元/時(08-12)、50元/時(12-24)。',
+    check: (r) => !r.bands && r.confidence === 'low',
+    why: '【回歸測試】兩套時段表混在一起會重疊，必須放棄解析並維持「需人工確認」',
+  },
+  {
+    text: '小型車：計時 30元/時(02時~19時)，40元/時(19時~02時)，停車全程以半小時計',
+    check: (r) => r.bands?.length === 2 && !r.bands.some((b) => b.hourly > 40),
+    why: '單一套時段表（時段剛好互補不重疊）要能正常解析',
+  },
+];
+
 console.log('='.repeat(64));
 console.log('第一部分：正確性測試');
 console.log('='.repeat(64));
@@ -98,6 +148,18 @@ for (const c of CASES) {
     for (const [k, v] of bad) console.log(`   ${k}: 預期 ${v} / 實際 ${got[k]}`);
   }
 }
+console.log('\n--- 時段費率與平假日費率 ---');
+for (const c of BAND_CASES) {
+  const got = parseFare(c.text);
+  if (c.check(got)) { pass++; console.log(`✓ ${c.why}`); }
+  else {
+    fail++;
+    console.log(`✗ ${c.why}`);
+    console.log(`   原文：${c.text.slice(0, 80)}`);
+    console.log(`   實際：bands=${JSON.stringify(got.bands)} weekend=${JSON.stringify(got.weekend)} conf=${got.confidence}`);
+  }
+}
+
 console.log(`\n通過 ${pass} / 失敗 ${fail}`);
 
 // ============================================================

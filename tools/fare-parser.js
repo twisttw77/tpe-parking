@@ -201,6 +201,83 @@ function detectComplex(text) {
   return reasons;
 }
 
+/**
+ * 解析「時段費率」：同一天不同時間收不同價。
+ *
+ * 台北市的寫法有兩種順序：
+ *   金額在前：40元/時(09-21)，30元/時(21-09)
+ *   時段在前：(10時~22時)50元/時，(22時~10時)10元/時
+ *
+ * @returns {Array<{from:number, to:number, hourly:number}>|null}
+ */
+function parseTimeBands(text) {
+  const bands = [];
+  const seen = new Set();
+
+  const push = (from, to, rate) => {
+    from = Number(from); to = Number(to); rate = Number(rate);
+    if (![from, to, rate].every(Number.isFinite)) return;
+    if (from > 24 || to > 24 || rate <= 0 || rate > 500) return;
+    to = to === 0 ? 24 : to;
+    from = from === 24 ? 0 : from;
+    if (from === to) return;
+    const key = `${from}-${to}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    bands.push({ from, to, hourly: rate });
+  };
+
+  // 金額在前：「40元/時(09-21)」
+  const reA = /(\d[\d,]*)\s*元\s*\/\s*時\s*[（(]\s*(\d{1,2})\s*時?\s*[-~至]\s*(\d{1,2})\s*時?\s*[)）]/g;
+  for (const m of text.matchAll(reA)) push(m[2], m[3], m[1]);
+
+  // 時段在前：「(10時~22時)50元/時」
+  const reB = /[（(]\s*(\d{1,2})\s*時?\s*[-~至]\s*(\d{1,2})\s*時?\s*[)）]\s*(\d[\d,]*)\s*元\s*\/\s*時/g;
+  for (const m of text.matchAll(reB)) push(m[1], m[2], m[3]);
+
+  // 至少要兩個時段才算「時段費率」，只有一個就不是
+  if (bands.length < 2) return null;
+
+  // 檢查時段有沒有重疊。
+  // 重疊代表原文其實是「好幾套時段表」（例如週一至週四一套、週五至週日另一套），
+  // 把它們混在一起算出來的錢會是錯的，這種情況寧可不解析。
+  const covered = new Array(24).fill(0);
+  for (const b of bands) {
+    if (b.from < b.to) {
+      for (let h = b.from; h < b.to; h++) covered[h]++;
+    } else {
+      for (let h = b.from; h < 24; h++) covered[h]++;
+      for (let h = 0; h < b.to; h++) covered[h]++;
+    }
+  }
+  if (covered.some((c) => c > 1)) return null;
+
+  return bands.sort((a, b) => a.from - b.from);
+}
+
+/**
+ * 解析「平日與假日不同價」。
+ * 寫法：週一至週五20元/時，週六至週日30元/時
+ * @returns {{weekday:number, weekend:number}|null}
+ */
+function parseWeekdayWeekend(text) {
+  // 平日
+  const wd = text.match(
+    /[週周星期][一1]\s*[-~至到]\s*[週周星期]?[五5][^,;.，。]{0,10}?(\d[\d,]*)\s*元\s*\/?\s*時/
+  );
+  // 假日（週六、週日、例假日、國定假日）
+  const we = text.match(
+    /[週周星期][六6][^,;.，。]{0,30}?(\d[\d,]*)\s*元\s*\/?\s*時/
+  );
+
+  if (!wd || !we) return null;
+  const weekday = toNum(wd[1]);
+  const weekend = toNum(we[1]);
+  if (!weekday || !weekend || weekday === weekend) return null;
+  if (weekday > 500 || weekend > 500) return null;
+  return { weekday, weekend };
+}
+
 /** 找每日收費上限 */
 function findDailyCap(text) {
   // 「當日單次停車最高收費上限20元/次」「每日上限200元」「全日最高300元」
@@ -272,6 +349,10 @@ function parseFare(rawText) {
   const round = findRounding(body);
   const cap = findDailyCap(text);
 
+  // 試著讀出時段費率與平假日費率
+  const bands = parseTimeBands(body);
+  const wdwe = parseWeekdayWeekend(body);
+
   // 首段價格 = 時薪 ×（首段長度 ÷ 60），單位價格 = 時薪 ×（單位長度 ÷ 60）
   const firstPrice = Math.round((rate.price * round.firstMin) / 60);
   const unitPrice = Math.round((rate.price * round.unitMin) / 60);
@@ -280,17 +361,10 @@ function parseFare(rawText) {
   //   high   規則寫得完整明確，可以放心使用
   //   medium 時薪明確，但進位方式是用常見規則推估的
   //   low    有時段/平假日/分區等變化，自動估算很可能不準
-  const complexReasons = detectComplex(body);
+  let complexReasons = detectComplex(body);
   let confidence = round.confidence;
-  if (complexReasons.length) confidence = 'low';
 
-  const notes = [round.label];
-  if (cap) notes.push(`每日上限 ${cap} 元`);
-  if (complexReasons.length) {
-    notes.push(`⚠ ${complexReasons.join('、')}，自動估算可能不準，建議手動確認`);
-  }
-
-  return {
+  const out = {
     raw,
     kind: 'hourly',
     firstMin: round.firstMin,
@@ -298,14 +372,52 @@ function parseFare(rawText) {
     unitMin: round.unitMin,
     unitPrice,
     dailyCap: cap,
-    confidence,
-    complexReasons,
     hourly: rate.price,
-    note: notes.join('；'),
   };
+
+  // 「時段費率」和「平假日費率」同時出現時，組合方式太多變，
+  // 硬解容易算錯，寧可維持標示為需人工確認。
+  const bothVary = bands && wdwe;
+
+  if (!bothVary && bands) {
+    out.bands = bands;
+    // 讀懂了就不再算它「複雜」
+    complexReasons = complexReasons.filter((r) => r !== '不同時段有不同費率' && r !== '日間與夜間費率不同');
+  }
+
+  if (!bothVary && wdwe) {
+    // 平日用原本解析到的規則，假日換成假日時薪
+    out.firstPrice = Math.round((wdwe.weekday * round.firstMin) / 60);
+    out.unitPrice = Math.round((wdwe.weekday * round.unitMin) / 60);
+    out.hourly = wdwe.weekday;
+    out.weekend = {
+      firstMin: round.firstMin,
+      firstPrice: Math.round((wdwe.weekend * round.firstMin) / 60),
+      unitMin: round.unitMin,
+      unitPrice: Math.round((wdwe.weekend * round.unitMin) / 60),
+      hourly: wdwe.weekend,
+    };
+    complexReasons = complexReasons.filter((r) => r !== '平日與假日費率不同');
+  }
+
+  if (complexReasons.length) confidence = 'low';
+
+  const notes = [round.label];
+  if (cap) notes.push(`每日上限 ${cap} 元`);
+  if (out.bands) notes.push(`分 ${out.bands.length} 個時段計費`);
+  if (out.weekend) notes.push(`假日每小時 ${out.weekend.hourly} 元`);
+  if (complexReasons.length) {
+    notes.push(`⚠ ${complexReasons.join('、')}，自動估算可能不準，建議手動確認`);
+  }
+
+  out.confidence = confidence;
+  out.complexReasons = complexReasons;
+  out.note = notes.join('；');
+  return out;
 }
 
 module.exports = {
   parseFare, normalize, stripMonthly, stripSurcharge,
   findHourlyRate, findRounding, findDailyCap, isFree, detectComplex,
+  parseTimeBands, parseWeekdayWeekend,
 };

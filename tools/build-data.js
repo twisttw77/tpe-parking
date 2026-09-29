@@ -54,9 +54,23 @@ function compact(lot) {
     fare.um = f.unitMin;
     fare.up = f.unitPrice;
     if (f.dailyCap != null) fare.cap = f.dailyCap;
-    if (f.hourly != null) fare.hr = f.hourly;
+    if (f.hourly != null) fare.hourly = f.hourly;
     fare.c = f.confidence;
     if (f.complexReasons?.length) fare.why = f.complexReasons;
+
+    // 時段費率（白天晚上不同價）
+    if (f.bands?.length) fare.bands = f.bands;
+
+    // 假日費率（欄位名要換成計費引擎用的短名）
+    if (f.weekend) {
+      fare.weekend = {
+        fm: f.weekend.firstMin,
+        fp: f.weekend.firstPrice,
+        um: f.weekend.unitMin,
+        up: f.weekend.unitPrice,
+        hourly: f.weekend.hourly,
+      };
+    }
   }
   // 費率原文一定要保留：詳情頁要原封不動顯示給使用者對照
   if (f.raw) fare.raw = f.raw;
@@ -131,6 +145,17 @@ function main() {
     'window.PARKING_DATA = ' + JSON.stringify(lots.map(compact)) + ';\n';
 
   fs.writeFileSync(OUT_FILE, body, 'utf8');
+
+  // 同步更新離線快取的版本號。
+  // 不做這件事的話，使用者手機裡會留著舊資料，要清快取才看得到新的。
+  const swPath = path.join(ROOT, 'sw.js');
+  if (fs.existsSync(swPath)) {
+    const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 12);
+    const sw = fs.readFileSync(swPath, 'utf8')
+      .replace(/const VERSION = '[^']*';/, `const VERSION = '${stamp}';`);
+    fs.writeFileSync(swPath, sw, 'utf8');
+    console.log(`\n離線快取版本已更新為 ${stamp}`);
+  }
 
   // ---------------- 報告 ----------------
   const kb = (fs.statSync(OUT_FILE).size / 1024).toFixed(0);
